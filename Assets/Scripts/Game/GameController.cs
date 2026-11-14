@@ -8,7 +8,7 @@ using UnityEngine.InputSystem;
 namespace LunarOutpost.Game
 {
     /// <summary>Builds the whole game at startup, runs the fixed-step loop, input, and the HUD.</summary>
-    public sealed class GameController : MonoBehaviour
+    public sealed partial class GameController : MonoBehaviour
     {
         [RuntimeInitializeOnLoadMethod(RuntimeInitializeLoadType.AfterSceneLoad)]
         static void Boot()
@@ -28,7 +28,7 @@ namespace LunarOutpost.Game
         System.Random _rand = new System.Random();
 
         double _acc;
-        bool _fast, _userPaused, _helpOpen = true, _launchOpen, _clearedOpen;
+        bool _fast, _userPaused, _helpOpen, _launchOpen, _clearedOpen;
         bool _flareModal;
         int _shelterHabitatId;
 
@@ -64,6 +64,7 @@ namespace LunarOutpost.Game
             _lander = FacilityViews.Lander(_world, lp);
             _player = new PlayerRig(_world, _v.F("planet.gravity"), _v.F("player.walkSpeed"), _v.F("player.jumpSpeed"), lp + new Vector3(5, 0, -5));
             NewGame();
+            StartTutorial();
         }
 
         static string Load(string path)
@@ -85,7 +86,7 @@ namespace LunarOutpost.Game
             _flareModal = _launchOpen = _clearedOpen = false;
         }
 
-        bool Paused => _userPaused || _helpOpen || _launchOpen || _flareModal || _clearedOpen || _s.Phase == Phase.GameOver;
+        bool Paused => _userPaused || _helpOpen || TutorialModal || _launchOpen || _flareModal || _clearedOpen || _s.Phase == Phase.GameOver;
         bool Outside => _s.PlayerLocation == PlayerLocation.Outside;
 
         void Update()
@@ -117,7 +118,7 @@ namespace LunarOutpost.Game
 
             if (!Paused)
             {
-                _acc += Time.deltaTime * _v["time.gameHoursPerRealSecond"] * (_fast ? _v["time.fastMultiplier"] : 1);
+                _acc += Time.deltaTime * _v["time.gameHoursPerRealSecond"] * (_fast ? _v["time.fastMultiplier"] : 1) * TutorialTimeScale;
                 int guard = 0;
                 while (_acc >= Simulation.StepHours && guard++ < 16)
                 {
@@ -138,6 +139,7 @@ namespace LunarOutpost.Game
                 if (f != null && f.Kind == FacilityKind.Solar) kv.Value.transform.rotation = Quaternion.LookRotation(sunFlat);
             }
             UpdateBuildPreview();
+            TickTutorial();
         }
 
         // ---------- interaction ----------
@@ -287,6 +289,7 @@ namespace LunarOutpost.Game
 
         GUIStyle _label, _small, _big, _box, _button;
         float _uiScale;
+        float _hudHeight = 200;
 
         void Styles()
         {
@@ -341,7 +344,7 @@ namespace LunarOutpost.Game
             Styles();
             var prevColor = GUI.color;
             GUI.color = new Color(0, 0, 0, 0.55f);
-            GUI.DrawTexture(new Rect(8, 8, 460, 660), Texture2D.whiteTexture);
+            GUI.DrawTexture(new Rect(8, 8, 460, _hudHeight), Texture2D.whiteTexture);   // height from the previous frame
             GUI.color = prevColor;
 
             float y = 14;
@@ -349,52 +352,69 @@ namespace LunarOutpost.Game
             Line(ref y, $"{I18n.T("title")}   {I18n.T("hud.day", day)}   {I18n.T("hud.speed", _fast ? _v["time.fastMultiplier"] : 1)}" +
                         (Paused ? "   " + I18n.T("hud.paused") : ""), null, _big);
 
-            double life = _sim.LifeDays(_s);
-            Line(ref y, I18n.T("hud.life", life.ToString("0.0")), life >= 7 ? Ok : life >= 3 ? Warn : Bad);
-            Line(ref y, I18n.T("hud.lifeDetail", _s.OxygenKg.ToString("0.0"), _s.WaterKg.ToString("0.0"), _s.FoodKg.ToString("0.0"), _s.IceKg.ToString("0.0")), null, _small);
-
-            Line(ref y, I18n.T("hud.power", _s.PowerProducedKw.ToString("0.0"), _s.PowerDemandKw.ToString("0.0")),
-                _s.PowerProducedKw >= _s.PowerDemandKw ? Ok : _s.BatteryKwh > 0 ? Warn : Bad);
-            Line(ref y, I18n.T("hud.battery", _s.BatteryKwh.ToString("0"), _sim.BatteryCapacity(_s).ToString("0")), null, _small);
-
-            Line(ref y, I18n.T("hud.shield", _s.PlayerDoseMsv.ToString("0.0"), _v["rad.doseLimitMsv"].ToString("0")));
-            Line(ref y, I18n.T("hud.shieldBase", _sim.IndoorFactor(_s, _sim.CrewShelter(_s)).ToString("0.00")), null, _small);
-
+            if (ShowHud("life"))
+            {
+                double life = _sim.LifeDays(_s);
+                Line(ref y, I18n.T("hud.life", life.ToString("0.0")), life >= 7 ? Ok : life >= 3 ? Warn : Bad);
+                Line(ref y, I18n.T("hud.lifeDetail", _s.OxygenKg.ToString("0.0"), _s.WaterKg.ToString("0.0"), _s.FoodKg.ToString("0.0"), _s.IceKg.ToString("0.0")), null, _small);
+            }
+            if (ShowHud("power"))
+                Line(ref y, I18n.T("hud.power", _s.PowerProducedKw.ToString("0.0"), _s.PowerDemandKw.ToString("0.0")),
+                    _s.PowerProducedKw >= _s.PowerDemandKw ? Ok : _s.BatteryKwh > 0 ? Warn : Bad);
+            if (ShowHud("battery"))
+                Line(ref y, I18n.T("hud.battery", _s.BatteryKwh.ToString("0"), _sim.BatteryCapacity(_s).ToString("0")), null, _small);
+            if (ShowHud("shield"))
+            {
+                Line(ref y, I18n.T("hud.shield", _s.PlayerDoseMsv.ToString("0.0"), _v["rad.doseLimitMsv"].ToString("0")));
+                Line(ref y, I18n.T("hud.shieldBase", _sim.IndoorFactor(_s, _sim.CrewShelter(_s)).ToString("0.00")), null, _small);
+            }
             if (Outside)
             {
-                double tank = _s.TankHours / _v["player.tankHours"];
-                Line(ref y, I18n.T("hud.tank", _s.TankHours.ToString("0")), tank > 0.5 ? Ok : tank > 0.25 ? Warn : Bad);
+                if (ShowHud("tank"))
+                {
+                    double tank = _s.TankHours / _v["player.tankHours"];
+                    Line(ref y, I18n.T("hud.tank", _s.TankHours.ToString("0")), tank > 0.5 ? Ok : tank > 0.25 ? Warn : Bad);
+                }
             }
             else
             {
                 Line(ref y, I18n.T("hud.indoors", I18n.T(_s.PlayerLocation == PlayerLocation.Lander ? "loc.lander" : "loc.habitat")), Ok);
             }
-
-            Line(ref y, _s.CommLinked ? I18n.T("hud.commOn", _v["comm.delaySec"].ToString("0.0")) : I18n.T("hud.commOff"), _s.CommLinked ? Ok : Bad);
-            Line(ref y, $"{I18n.T(_s.EarthVisible ? "hud.earthUp" : "hud.earthDown")}  ·  {I18n.T("hud.relays", _s.RelaySatellites)}", null, _small);
-            Line(ref y, $"{I18n.T("hud.materials", _s.Materials.ToString("0"))}   {I18n.T("hud.crew", _s.CrewCount, _sim.CrewCapacity(_s))}" +
-                        (_s.CarriedIceKg > 0 ? "   " + I18n.T("hud.carry", _s.CarriedIceKg.ToString("0")) : ""), null, _small);
-            Line(ref y, _s.TimeHours >= _s.NextLaunchAtHours ? I18n.T("hud.launchReady")
-                : I18n.T("hud.launchIn", ((_s.NextLaunchAtHours - _s.TimeHours) / 24).ToString("0.0")), null, _small);
-            foreach (var l in _s.Launches)
-                Line(ref y, I18n.T("hud.inTransit", ((l.ArrivesAtHours - _s.TimeHours) / 24).ToString("0.0")), null, _small);
-
-            y += 6;
-            Line(ref y, I18n.T("hud.dev", _s.Dev.Total.ToString("0"), _s.Dev.Best.ToString("0")), _s.Dev.Total >= _v["dev.clearThreshold"] ? Ok : null);
-            Bar(ref y, I18n.T("hud.devSelf"), _s.Dev.SelfSufficiency, 100);
-            Bar(ref y, I18n.T("hud.devStab"), _s.Dev.Stability, 100);
-            Bar(ref y, I18n.T("hud.devSafe"), _s.Dev.Safety, 100);
-            Bar(ref y, I18n.T("hud.devScale"), _s.Dev.Scale, 100);
+            if (ShowHud("comm"))
+            {
+                Line(ref y, _s.CommLinked ? I18n.T("hud.commOn", _v["comm.delaySec"].ToString("0.0")) : I18n.T("hud.commOff"), _s.CommLinked ? Ok : Bad);
+                Line(ref y, $"{I18n.T(_s.EarthVisible ? "hud.earthUp" : "hud.earthDown")}  ·  {I18n.T("hud.relays", _s.RelaySatellites)}", null, _small);
+            }
+            if (ShowHud("materials"))
+                Line(ref y, $"{I18n.T("hud.materials", _s.Materials.ToString("0"))}   {I18n.T("hud.crew", _s.CrewCount, _sim.CrewCapacity(_s))}" +
+                            (_s.CarriedIceKg > 0 ? "   " + I18n.T("hud.carry", _s.CarriedIceKg.ToString("0")) : ""), null, _small);
+            if (ShowHud("launch"))
+            {
+                Line(ref y, _s.TimeHours >= _s.NextLaunchAtHours ? I18n.T("hud.launchReady")
+                    : I18n.T("hud.launchIn", ((_s.NextLaunchAtHours - _s.TimeHours) / 24).ToString("0.0")), null, _small);
+                foreach (var l in _s.Launches)
+                    Line(ref y, I18n.T("hud.inTransit", ((l.ArrivesAtHours - _s.TimeHours) / 24).ToString("0.0")), null, _small);
+            }
+            if (ShowHud("dev"))
+            {
+                y += 6;
+                Line(ref y, I18n.T("hud.dev", _s.Dev.Total.ToString("0"), _s.Dev.Best.ToString("0")), _s.Dev.Total >= _v["dev.clearThreshold"] ? Ok : null);
+                Bar(ref y, I18n.T("hud.devSelf"), _s.Dev.SelfSufficiency, 100);
+                Bar(ref y, I18n.T("hud.devStab"), _s.Dev.Stability, 100);
+                Bar(ref y, I18n.T("hud.devSafe"), _s.Dev.Safety, 100);
+                Bar(ref y, I18n.T("hud.devScale"), _s.Dev.Scale, 100);
+            }
+            _hudHeight = y + 4;
 
             if (_s.ActiveEvent != null)
             {
                 var src = _s.ActiveEvent.Source;
-                var r = new Rect(W / 2 - 360, 12, 720, 40);
+                var r = new Rect(W / 2 - 360, H - 150, 720, 40);
                 GUI.color = new Color(0.6f, 0, 0, 0.75f);
                 GUI.DrawTexture(r, Texture2D.whiteTexture);
                 GUI.color = prevColor;
                 GUI.Label(new Rect(r.x + 12, r.y + 8, r.width - 24, 30),
-                    I18n.T("hud.flare", src.Kind == "sep" ? "SEP" : "Flare", src.ClassOrIntensity, src.Date), _label);
+                    I18n.T("hud.flare", I18n.T(src.Kind == "sep" ? "flare.kindSep" : "flare.kindFlare"), src.ClassOrIntensity, src.Date), _label);
             }
 
             DrawContextHints();
@@ -406,6 +426,7 @@ namespace LunarOutpost.Game
             if (_flareModal) DrawFlareModal();
             if (_clearedOpen) DrawCleared();
             if (_s.Phase == Phase.GameOver) DrawGameOver();
+            DrawTutorial();
             if (_helpOpen) DrawHelp();
         }
 
@@ -541,14 +562,23 @@ namespace LunarOutpost.Game
             var r = Panel(620, 300);
             GUI.Label(new Rect(r.x + 20, r.y + 16, 580, 36), I18n.T("flare.title"), new GUIStyle(_big) { normal = { textColor = Bad } });
             GUI.Label(new Rect(r.x + 20, r.y + 60, 580, 150),
-                I18n.T("flare.body", src.Kind == "sep" ? "SEP" : "X-class flare", src.ClassOrIntensity, src.Date, src.DonkiId), _label);
+                I18n.T("flare.body", I18n.T(src.Kind == "sep" ? "flare.kindSep" : "flare.kindFlare"), src.ClassOrIntensity, src.Date, src.DonkiId), _label);
             if (GUI.Button(new Rect(r.x + 20, r.y + 240, 270, 40), I18n.T("flare.shelter"), _button))
             {
                 var hab = _s.Facilities.FirstOrDefault(f => f.Kind == FacilityKind.Habitat);
                 EnterShelter(hab != null ? PlayerLocation.Habitat : PlayerLocation.Lander, hab?.Id ?? 0);
-                _flareModal = false;
+                OnFlareChoice("shelter");
             }
-            if (GUI.Button(new Rect(r.x + 320, r.y + 240, 270, 40), I18n.T("flare.continue"), _button)) _flareModal = false;
+            if (GUI.Button(new Rect(r.x + 320, r.y + 240, 270, 40), I18n.T("flare.continue"), _button)) OnFlareChoice("continue");
+        }
+
+        void OnFlareChoice(string choice)
+        {
+            _flareModal = false;
+            if (_tutorialDone) return;
+            _flareChoice = choice;
+            // A short storm so the lesson does not stall.
+            _s.ActiveEvent.EndsAtHours = _s.TimeHours + _v["tutorial.stormHours"];
         }
 
         void DrawCleared()

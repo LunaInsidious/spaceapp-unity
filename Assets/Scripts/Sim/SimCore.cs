@@ -16,6 +16,9 @@ namespace LunarOutpost.Sim
         readonly List<DonkiEvent> _donki;
         readonly Func<double> _rng;
 
+        /// <summary>Random space-weather events. Off during the tutorial, which starts its own.</summary>
+        public bool RandomEvents = true;
+
         public Simulation(Values values, List<DonkiEvent> donki, Func<double> rng)
         {
             _v = values;
@@ -362,7 +365,7 @@ namespace LunarOutpost.Sim
                 return;
             }
             // TODO(人間に確認): SPEC replays a real DONKI period day by day. MVP draws archived events at random.
-            if (_rng() < _v["event.flareChancePerDay"] / 24.0)
+            if (RandomEvents && _rng() < _v["event.flareChancePerDay"] / 24.0)
             {
                 var src = _donki[(int)(_rng() * _donki.Count) % _donki.Count];
                 s.ActiveEvent = new ActiveEvent
@@ -373,6 +376,19 @@ namespace LunarOutpost.Sim
                 };
                 ev.Add(new GameEvent(GameEventType.EventStarted, src.DonkiId));
             }
+        }
+
+        /// <summary>Starts a chosen archived DONKI event now (tutorial). The alert always reaches the player.</summary>
+        public List<GameEvent> StartArchivedEvent(SimState s, int index)
+        {
+            var src = _donki[index];
+            s.ActiveEvent = new ActiveEvent
+            {
+                Source = src,
+                EndsAtHours = s.TimeHours + _v["event.flareDurationHours"],
+                Alerted = true,
+            };
+            return new List<GameEvent> { new GameEvent(GameEventType.EventStarted, src.DonkiId) };
         }
 
         void UpdateLaunches(SimState s, List<GameEvent> ev)
