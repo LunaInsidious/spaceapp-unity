@@ -1,0 +1,8 @@
+{
+  "_note": "TODO(人間に確認): DONKI の ID・日時・等級を https://kauai.ccmc.gsfc.nasa.gov/DONKI/ で照合すること。未照合のものは verified=false。",
+  "events": [
+    { "kind": "solarFlare", "donkiId": "2024-10-03T12:08:00-FLR-001", "date": "2024-10-03", "classOrIntensity": "X9.0", "verified": false },
+    { "kind": "solarFlare", "donkiId": "2024-05-14T16:46:00-FLR-001", "date": "2024-05-14", "classOrIntensity": "X8.7", "verified": false },
+    { "kind": "sep", "donkiId": "2024-05-11T02:15:00-SEP-001", "date": "2024-05-11", "classOrIntensity": "SEP (>10 MeV)", "verified": false }
+  ]
+}
