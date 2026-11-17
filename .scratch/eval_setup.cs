@@ -1,0 +1,21 @@
+using System.Reflection;
+using UnityEngine;
+var gc = Object.FindAnyObjectByType<LunarOutpost.Game.GameController>();
+var t = gc.GetType();
+var bf = BindingFlags.NonPublic | BindingFlags.Instance;
+t.GetField("_helpOpen", bf).SetValue(gc, false);
+var sim = (LunarOutpost.Sim.Simulation)t.GetField("_sim", bf).GetValue(gc);
+var s = (LunarOutpost.Sim.SimState)t.GetField("_s", bf).GetValue(gc);
+var world = (LunarOutpost.Game.MoonWorld)t.GetField("_world", bf).GetValue(gc);
+var handle = t.GetMethod("Handle", bf);
+void Build(LunarOutpost.Sim.FacilityKind k, float x, float z) =>
+    handle.Invoke(gc, new object[] { sim.ApplyCommand(s, world, new LunarOutpost.Sim.BuildCommand { Kind = k, X = x, Z = z }) });
+Build(LunarOutpost.Sim.FacilityKind.Habitat, -12, 8);
+Build(LunarOutpost.Sim.FacilityKind.Solar, 10, -10);
+Build(LunarOutpost.Sim.FacilityKind.Solar, 16, -6);
+Build(LunarOutpost.Sim.FacilityKind.Battery, 8, 6);
+Build(LunarOutpost.Sim.FacilityKind.Antenna, -6, -14);
+Build(LunarOutpost.Sim.FacilityKind.LifeSupport, -18, -4);
+Build(LunarOutpost.Sim.FacilityKind.IceDrill, 75, 70);
+LunarOutpost.Game.I18n.Toggle();
+return $"materials={s.Materials} facilities={s.Facilities.Count} sunlit0={world.IsSunlit(10,-10,s.SunAzimuthRad)}";
